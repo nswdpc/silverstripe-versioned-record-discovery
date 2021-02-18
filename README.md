@@ -23,14 +23,14 @@ If you are new to creating ModelAdmins to allow easy manipulation of data in the
 
 The report will automatically show all versioned records in the system.
 
-If you wish to set a default model for the reporting view, set this in configuration (using the `Page` class as an example):
+If you wish to set a different default model for the reporting view, set this in configuration (using the `Page` class as an example):
 
 ```yml
 ---
 Name: 'default-target-model'
 ---
 NSWDPC\Utilities\VersionedRecordDiscovery\UnpublishedRecordReport:
-    default_target_model: '\Page'
+    default_target_model: 'Page'
 ```
 
 

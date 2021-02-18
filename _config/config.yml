@@ -1,3 +1,7 @@
 ---
-Name: nswdpc-module-skeleton
+Name: nswdpc-versioned-record-discovery
+Only:
+  moduleexists: silverstripe/cms
 ---
+NSWDPC\Utilities\VersionedRecordDiscovery\UnpublishedRecordReport:
+  default_target_model: 'SilverStripe\CMS\Model\SiteTree'
