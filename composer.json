@@ -17,8 +17,8 @@
         }
     ],
     "require": {
-        "silvestripe/admin" : "^1",
-        "silvestripe/versioned" : "^1",
+        "silverstripe/admin" : "^1",
+        "silverstripe/versioned" : "^1",
         "silverstripe/reports" : "^4"
     },
     "require-dev": {
