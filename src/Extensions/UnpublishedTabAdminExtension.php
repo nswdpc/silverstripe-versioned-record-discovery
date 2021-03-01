@@ -7,9 +7,10 @@ use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Versioned\Versioned;
 
 /*
- * This extension automatically adds a "Record (unpublished)" in modeladmins
- * that are configured to use it
- * To configure your model admin, add a private static to it:
+ * This extension automatically adds a "Record (unpublished)" in ModelAdmin subclasses
+ * that are configured to use it. Check the README.md for setup instructions.
+ *
+ * To configure your model admin, add a private static $unpublished_tabs to it:
 
     private static $unpublished_tabs = [
         'myrecordunpublished' => MyRecord::class,
