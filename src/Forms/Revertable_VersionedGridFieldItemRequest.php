@@ -3,11 +3,15 @@
 namespace NSWDPC\Utilities\VersionedRecordDiscovery;
 
 use SilverStripe\Control\Controller;
-use SilverStripe\Forms\CompositeField;
-use SilverStripe\Forms\Fieldlist;
+use SilverStripe\Forms\FieldList;
+use SilverStripe\Forms\Form;
 use SilverStripe\Forms\FormField;
+use SilverStripe\Forms\HiddenField;
+use SilverStripe\Forms\TextField;
+use SilverStripe\Forms\LiteralField;
 use SilverStripe\Forms\GridField\GridField;
 use SilverStripe\Forms\GridField\GridFieldConfig_Base;
+use SilverStripe\Forms\GridField\GridFieldPaginator;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\FieldType\DBField;
 use SilverStripe\ORM\FieldType\DBDatetime;
@@ -15,41 +19,56 @@ use SilverStripe\ORM\ValidationResult;
 use SilverStripe\Versioned\Versioned;
 use SilverStripe\Versioned\VersionedGridFieldItemRequest;
 use SilverStripe\View\ArrayData;
+use SilverStripe\View\Requirements;
 
 /**
  * Versioned items request to view the record at the relevant version
  */
-class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequest
+class Revertable_VersionedGridFieldItemRequest extends VersionedGridFieldItemRequest
 {
 
+    /**
+     * The version being requested
+     * @var null|string
+     */
     protected $version = null;
-
-    private static $url_handlers = [
-        '$Action!' => '$Action',
-        '' => 'view',
-    ];
 
     /**
      * Defines methods that can be called directly
      * @var array
      */
     private static $allowed_actions = [
-        'view' => true,
+        'view',
         'ItemEditForm' => true
     ];
 
     public function __construct($gridField, $component, $record, $requestHandler, $popupFormName)
     {
         try {
-            // set the current record to be the record at the relevant version
+            // set the current record to be the record at the relevant requetsed version
             $record = $this->getVersionRecordFromRecord($record, $requestHandler);
+            // set current record  at version as the viewable record
             parent::__construct($gridField, $component, $record, $requestHandler, $popupFormName);
         } catch (\Exception $e) {
             return $requestHandler->httpError(
                 404,
-                _t(__CLASS__ . '.InvalidVersion', $e->getMessage())
+                _t('ReviewAndRevert.InvalidVersion', $e->getMessage())
             );
         }
+    }
+
+    /**
+     * Breadcrumbs - update with version value
+     */
+    public function Breadcrumbs($unlinked = false)
+    {
+        $items = parent::Breadcrumbs($unlinked);
+        $this->version = self::getRequestedRevertVersion();
+        if($this->version) {
+            $lastItem = $items->last();
+            $lastItem->setField('Title', _t('ReviewAndRevert.VERSION', 'v{version}', ['version' => $this->version ]));
+        }
+        return $items;
     }
 
     /**
@@ -81,7 +100,7 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
         if(!$this->version) {
             throw new \Exception(
                 _t(
-                    __CLASS__ . ".VERSION_NOT_PROVIDED",
+                    "ReviewAndRevert.VERSION_NOT_PROVIDED",
                     "No version provided"
                 )
             );
@@ -91,7 +110,7 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
         if(!$record->hasExtension(Versioned::class)) {
             throw new \Exception(
                 _t(
-                    __CLASS__ . ".RECORD_NOT_VERSIONED",
+                    "ReviewAndRevert.RECORD_NOT_VERSIONED",
                     "The record is not versioned"
                 )
             );
@@ -100,7 +119,7 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
         if(!$record->canView()) {
             throw new \Exception(
                 _t(
-                    __CLASS__ . ".NO_ACCESS",
+                    "ReviewAndRevert.NO_ACCESS",
                     "You do not have access to this record"
                 )
             );
@@ -112,7 +131,7 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
         if(empty($versioned_record->ID)) {
             throw new \Exception(
                 _t(
-                    __CLASS__ . ".VERSION_NOT_FOUND",
+                    "ReviewAndRevert.VERSION_NOT_FOUND",
                     "No version #{$this->version} found for this record"
                 )
             );
@@ -125,7 +144,6 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
      * Display the version of the record at the specific time
      */
     public function view($request) {
-
         if (!$this->record->canView()) {
             $this->httpError(403);
         }
@@ -144,6 +162,7 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
 
     /**
      * Return the detail form for this version of the record
+     * The form includes: a summary of changed fields, items from the changeset for this version
      * @return Form
      */
     public function ItemEditForm()
@@ -151,68 +170,61 @@ class RevertableVersionedGridFieldItemRequest extends VersionedGridFieldItemRequ
         // the parent will call updateItemEditForm
         $form = parent::ItemEditForm();
 
-        // make all fields readonly
-        $fieldlist = $form->Fields();
-        $this->transformDataFields($fieldlist);
-        // set the transformed fields back on the form
-        $form->setFields($fieldlist);
-
+        // record being viewed at the requested version
         $record = $this->getRecord();
 
-        $created = ($record->Created ? DBField::create_field(DBDatetime::class, $record->Created) : null);
+        // Check for request in a versioned view
+        $this->version = self::getRequestedRevertVersion();
+        if($this->version) {
 
-        if ($record->isLatestVersion()) {
+            $form->setFields( FieldList::create() );
+
+            $created = ($record->Created ? DBField::create_field(DBDatetime::class, $record->Created) : null);
             $message = _t(
-                __CLASS__ . '.VIEWINGLATEST',
-                "You are currently viewing the latest version, created {created}",
-                [
-                    'version' => $this->version,
-                    'created' => $created ? $created->Nice() : '?'
-                ]
-            );
-        } else {
-            $message = _t(
-                __CLASS__ . '.VIEWINGVERSION',
+                'ReviewAndRevert.VIEWING_VERSION',
                 "You are currently viewing version {version}, created {created}",
                 [
                     'version' => $this->version,
                     'created' => $created ? $created->Nice() : '?'
                 ]
             );
-        }
 
-        $form->sessionMessage(
-            DBField::create_field('HTMLFragment', $message),
-            ValidationResult::TYPE_WARNING
-        );
+            $form->sessionMessage(
+                DBField::create_field('HTMLFragment', $message),
+                ValidationResult::TYPE_WARNING
+            );
 
-        // remove any actions that may have been added by other extensions
-        // in versioned mode, we only want the revert action
-        $actions = $form->Actions();
-        $version = RevertableVersionedGridFieldItemRequest::getRequestedRevertVersion();
-        if($version) {
+            // When in versioned view, remove other actions
+            $actions = $form->Actions();
             $record->removeOtherActions($actions);
-        }
-        return $form;
-    }
 
-    /**
-     * Transform all data fields into their reviewable state
-     * @param Fieldlist $fieldlist
-     */
-    protected function transformDataFields(Fieldlist &$fieldlist) : array {
-        $fields = $fieldlist->dataFields();
-        foreach($fields as $k => $field) {
-            if($field instanceof GridField) {
-                // GridFields are set to a basic listing view via their config
-                $field->setConfig( new GridFieldConfig_Base());
+            $changeSetFieldList = $record->getChangedItems();
+            foreach($changeSetFieldList as $field) {
+                $form->Fields()->push( $field );
             }
-            $fieldlist->replaceField(
-                $field->getName(),
-                $field->performReadonlyTransformation()
+
+            // Target revert version
+            $form->Fields()->unshift(
+                HiddenField::create(
+                    self::getRevertRequestValueName(),
+                    'Version',
+                    $this->version
+                )
+            );
+
+        } else {
+            $form->setFields( FieldList::create() );
+            $message = _t(
+                'ReviewAndRevert.NO_VERSION',
+                "No version was provided"
+            );
+            $form->sessionMessage(
+                DBField::create_field('HTMLFragment', $message),
+                ValidationResult::TYPE_WARNING
             );
         }
-        return $fields;
+
+        return $form;
     }
 
 }

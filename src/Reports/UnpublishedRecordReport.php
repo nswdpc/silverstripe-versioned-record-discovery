@@ -28,16 +28,16 @@ class UnpublishedRecordReport extends Report
     private static $default_target_model = "";
 
     public function title() {
-        return _t(__CLASS__ . ".REPORT_TITLE", "Unpublished records");
+        return _t("ReviewAndRevert.REPORT_TITLE", "Unpublished records");
     }
 
     public function description() {
-        return _t(__CLASS__ . ".REPORT_DESCRIPTION", "View  and filter unpublished records");
+        return _t("ReviewAndRevert.REPORT_DESCRIPTION", "View  and filter unpublished records");
     }
 
     public function group()
     {
-        return _t(__CLASS__.'.GROUP_TITLE', "Versioned record reports");
+        return _t("ReviewAndRevert.GROUP_TITLE", "Versioned record reports");
     }
 
     public function sort()
@@ -55,7 +55,7 @@ class UnpublishedRecordReport extends Report
         $default_target_model = $this->config()->get('default_target_model');
         if(empty($params) && !$default_target_model) {
             // no params, no initial filter
-            return _t(__CLASS__ . '.LOTS', ">= 0");
+            return _t('ReviewAndRevert.LOTS', ">= 0");
         } else {
 
             try {
@@ -124,13 +124,13 @@ class UnpublishedRecordReport extends Report
     {
         return [
             "RecordPK" => [
-                "title" =>  _t(__CLASS__ . ".ID", "ID"),
+                "title" =>  _t("ReviewAndRevert.ID", "ID"),
                 'formatting' => function ($value, DataObject $item) {
                     return '#' . $item->ID;
                 }
             ],
             "ImageThumbnail" => [
-                "title" =>  _t(__CLASS__ . ".IMAGE", "Image"),
+                "title" =>  _t("ReviewAndRevert.IMAGE", "Image"),
                 'formatting' => function ($value, DataObject $item) {
                     if($item instanceof Image) {
                         return $image->CMSThumbnail();
@@ -140,7 +140,7 @@ class UnpublishedRecordReport extends Report
                 }
             ],
             "Title" => [
-                "title" =>  _t(__CLASS__ . ".TITLE", "Title"),
+                "title" =>  _t("ReviewAndRevert.TITLE", "Title"),
                 'formatting' => function ($value, DataObject $item) {
                     $value = $item->Title;
                     if (!empty($value)) {
@@ -151,11 +151,11 @@ class UnpublishedRecordReport extends Report
                         }
                         return $value;
                     }
-                    return _t(__CLASS__ . '.NOTITLE', 'No title');
+                    return _t('ReviewAndRevert.NOTITLE', 'No title');
                 }
             ],
             "UnpublishedDate" => [
-                "title" =>  _t(__CLASS__ . ".UNPUBLISHED_DATE", "Unpublished on"),
+                "title" =>  _t("ReviewAndRevert.UNPUBLISHED_DATE", "Unpublished on"),
                 "formatting" => function ($value, DataObject $item) {
                     $last_published = $item->Versions()
                                 ->sort('LastEdited DESC')
@@ -173,10 +173,10 @@ class UnpublishedRecordReport extends Report
                 }
             ],
             "Created" => [
-                "title" => _t(__CLASS__ . ".CREATED", "Created")
+                "title" => _t("ReviewAndRevert.CREATED", "Created")
             ],
             "LastEdited" => [
-                "title" => _t(__CLASS__ . ".EDITED", "Edited")
+                "title" => _t("ReviewAndRevert.EDITED", "Edited")
             ],
             "AbsoluteLink" =>  [
                 "title" => "URL",
@@ -188,7 +188,7 @@ class UnpublishedRecordReport extends Report
                         }
                         return $value;
                     }
-                    return _t(__CLASS__ . '.NOINK', 'No link');
+                    return _t('ReviewAndRevert.NOINK', 'No link');
                 }
             ],
         ];
@@ -272,9 +272,9 @@ class UnpublishedRecordReport extends Report
 
                 if($element) {
                     // highlight that this model is a content element from Elemental
-                    $description .= _t(__CLASS__ . ".CONTENT_ELEMENT", " (content element)");
+                    $description .= _t("ReviewAndRevert.CONTENT_ELEMENT", " (content element)");
                 } else if( class_exists(EditableFormField::class) && $inst instanceof EditableFormField ) {
-                    $description .= _t(__CLASS__ . ".EDITABLE_FORM_FIELD", " (editable form field)");
+                    $description .= _t("ReviewAndRevert.EDITABLE_FORM_FIELD", " (editable form field)");
                 }
 
                 $items[ $class ] = strip_tags(trim($title . " " . $description));

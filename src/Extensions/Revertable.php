@@ -6,13 +6,14 @@ use LeKoala\CmsActions\CustomAction;
 use LeKoala\CmsActions\SilverStripeIcons;
 use SilverStripe\Admin\ModelAdmin;
 use SilverStripe\Control\Controller;
-use SilverStripe\Control\HTTPResponse;
 use SilverStripe\Forms\FieldList;
 use SilverStripe\Forms\FormField;
 use SilverStripe\Forms\HiddenField;
+use SilverStripe\Forms\TextField;
 use SilverStripe\Forms\LiteralField;
 use SilverStripe\Forms\GridField\GridField;
-use SilverStripe\Forms\GridField\GridFieldConfig_RecordViewer;
+use SilverStripe\Forms\GridField\GridField_ActionMenu;
+use SilverStripe\Forms\GridField\GridFieldConfig_Base;
 use SilverStripe\Forms\GridField\GridFieldPageCount;
 use SilverStripe\Forms\GridField\GridFieldToolbarHeader;
 use SilverStripe\Forms\GridField\GridFieldDetailForm;
@@ -20,11 +21,15 @@ use SilverStripe\Forms\GridField\GridFieldDataColumns;
 use SilverStripe\Forms\GridField\GridFieldPaginator;
 use SilverStripe\Forms\GridField\GridFieldViewButton;
 use SilverStripe\Forms\GridField\GridFieldFilterHeader;
+use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataExtension;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\ValidationResult;
+use SilverStripe\ORM\FieldType\DBField;
+use SilverStripe\Versioned\ChangeSet;
+use SilverStripe\Versioned\ChangeSetItem;
 use SilverStripe\Versioned\Versioned;
-use SilverStripe\Versioned\VersionedGridFieldItemRequest;
+use SilverStripe\View\ArrayData;
 use Symbiote\AdvancedWorkflow\DataObjects\WorkflowInstance;
 use Symbiote\AdvancedWorkflow\Extensions\WorkflowApplicable;
 
@@ -41,7 +46,7 @@ class Revertable extends DataExtension {
      * Returns the revert key/value (if supplied) for use in URL and form fields
      */
     public function getRevertTargetForUrl($value = null)  : string {
-        $key = RevertableVersionedGridFieldItemRequest::getRevertRequestValueName();
+        $key = Revertable_VersionedGridFieldItemRequest::getRevertRequestValueName();
         if($value) {
             return "{$key}={$value}";
         } else {
@@ -106,16 +111,19 @@ class Revertable extends DataExtension {
     }
 
     /**
-     * Ensure the revert action is correctly placed into the actions area
+     * Remove all other actions when the version is present
      */
     public function onAfterUpdateCMSActions(Fieldlist &$actions) {
-        $version = RevertableVersionedGridFieldItemRequest::getRequestedRevertVersion();
+        $version = Revertable_VersionedGridFieldItemRequest::getRequestedRevertVersion();
         if($version) {
             $this->removeOtherActions($actions);
         }
     }
 
-    public function removeOtherActions($actions) {
+    /**
+     * Rmemove actions from the Fieldlist, excluding the revert custom action
+     */
+    public function removeOtherActions(Fieldlist $actions) {
         // remove all actions, apart from te revert action
         $revert_action = $this->owner->getRevertToVersionActionName();
         foreach($actions as $action) {
@@ -139,12 +147,12 @@ class Revertable extends DataExtension {
             $push = false;
         }
 
-        $version = RevertableVersionedGridFieldItemRequest::getRequestedRevertVersion();
+        $version = Revertable_VersionedGridFieldItemRequest::getRequestedRevertVersion();
         if(!$version) {
-            // requests not specifying a version cannot be workflowed
+            // Rule: when no version, do not push the revert action
             $push = false;
         } else {
-            // in a versioned view ... clear any other actions
+            // Rule: in a version view ... clear any other actions
             $this->removeOtherActions($actions);
         }
 
@@ -153,7 +161,7 @@ class Revertable extends DataExtension {
             $actions->push( CustomAction::create(
                     $this->owner->getRevertToVersionActionName(),
                     _t(
-                        __CLASS__ . ".REVERT_TO_VERSION_VERSION",
+                        "ReviewAndRevert.REVERT_TO_VERSION_VERSION",
                         "Revert to version {version}",
                         [
                             'title' => $this->owner->Title,
@@ -169,8 +177,19 @@ class Revertable extends DataExtension {
     /**
      * Return the name of the action
      */
-    public function getRevertToVersionActionName() {
+    public function getRevertToVersionActionName() : string {
         return "doRevertToVersion";
+    }
+
+    /**
+     * Attempt to get the latest version for this record
+     */
+    public function getLatestVersionForRevert() {
+        if(!$this->owner->exists()) {
+            return false;
+        } else {
+            return Versioned::get_latest_version(get_class($this->owner), $this->owner->ID);
+        }
     }
 
     /**
@@ -188,7 +207,7 @@ class Revertable extends DataExtension {
             // no link target is set
             $link = "";
             // the version to revert to  - store the original version (raw request) and the version (will be validated)
-            $original_version = $version = RevertableVersionedGridFieldItemRequest::getRequestedRevertVersion();
+            $original_version = $version = Revertable_VersionedGridFieldItemRequest::getRequestedRevertVersion();
 
             /**
              * @var string
@@ -196,7 +215,7 @@ class Revertable extends DataExtension {
             if(!$version) {
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".VERSION_NOT_PROVIDED",
+                        "ReviewAndRevert.VERSION_NOT_PROVIDED",
                         "The version you wish to revert to was not provided"
                     )
                 );
@@ -207,7 +226,7 @@ class Revertable extends DataExtension {
             if($version <= 1) {
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".INVALID_VERSION_NUMBER",
+                        "ReviewAndRevert.INVALID_VERSION_NUMBER",
                         "The requested version '{original_version}' is not a valid version",
                         [
                             'original_version' => $original_version
@@ -220,7 +239,7 @@ class Revertable extends DataExtension {
             if(!$controller instanceof ModelAdmin) {
                 throw new \Exception(
                     _t(
-                        __CLASS__ . ".NOT_A_MODELADMIN",
+                        "ReviewAndRevert.NOT_A_MODELADMIN",
                         "Revert can only happen in a ModelAdmin"
                     )
                 );
@@ -233,7 +252,7 @@ class Revertable extends DataExtension {
             if(!$this->owner->hasMethod('CMSEditLink')) {
                 throw new \Exception(
                     _t(
-                        __CLASS__ . ".NOT_A_MODELADMIN",
+                        "ReviewAndRevert.NO_CMS_EDIT_LINK",
                         "Revert requires a record that implements CMSEditLink"
                     )
                 );
@@ -244,7 +263,7 @@ class Revertable extends DataExtension {
                 // Rule: items in a workflow cannot be reverted
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".IN_A_WORKFLOW",
+                        "ReviewAndRevert.IN_A_WORKFLOW",
                         "This item is in a workflow, please approve or reject the workflow prior to reverting it"
                     )
                 );
@@ -254,17 +273,17 @@ class Revertable extends DataExtension {
             if(!$this->owner->canView() || !$this->owner->canEdit()) {
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".NO_ACCESS_TO_RECORD",
+                        "ReviewAndRevert.NO_ACCESS_TO_RECORD",
                         "You do not have access to this record"
                     )
                 );
             }
 
-            $latest = Versioned::get_latest_version(get_class($this->owner), $this->owner->ID);
+            $latest = $this->owner->getLatestVersionForRevert();
             if(!$latest) {
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".NO_LATEST_VERSION",
+                        "ReviewAndRevert.NO_LATEST_VERSION",
                         "The latest version of this record could not be found, this record cannot be reverted"
                     )
                 );
@@ -273,7 +292,7 @@ class Revertable extends DataExtension {
             if($latest->Version == $version) {
                 throw new RevertException(
                     _t(
-                        __CLASS__ . ".CANNOT_REVERT_TO_LATEST_VERSION",
+                        "ReviewAndRevert.CANNOT_REVERT_TO_LATEST_VERSION",
                         "Sorry, you cannot revert to the latest version of this record!"
                     )
                 );
@@ -288,7 +307,7 @@ class Revertable extends DataExtension {
             // general error
             $error = true;
             $message = _t(
-                __CLASS__ . ".GENERAL_ERROR_ON_REVERT",
+                "ReviewAndRevert.GENERAL_ERROR_ON_REVERT",
                 "The record could not be reverted to the requested verion"
             );
         }
@@ -297,7 +316,7 @@ class Revertable extends DataExtension {
         if($error) {
 
             // set the form session message
-            $form->sessionMessage($message, ValidationResult::TYPE_BAD, ValidationResult::CAST_HTML);
+            $form->sessionMessage($message, ValidationResult::TYPE_ERROR, ValidationResult::CAST_HTML);
 
             if(!$link) {
                 // no link was set, something failed early on
@@ -314,13 +333,18 @@ class Revertable extends DataExtension {
             $rollback = false;
             $current = $this->owner->rollbackRecursive($version);
             if(empty($current->Version)) {
-                throw new \Exception("No current version returned post-rollback");
+                throw new \Exception(
+                    _t(
+                        'ReviewAndRevert.NO_CURRENT_VERSION',
+                        "No current version returned post-rollback"
+                    )
+                );
             }
             $rollback = true;
         } catch (\InvalidArgumentException $e) {
             // catch invalid argument exceptions - Versioned doesn't like the input
             $message = _t(
-                __CLASS__ . ".VERSIONED_ROLLBACK_FAILED_INVALID_INPUT",
+                "ReviewAndRevert.VERSIONED_ROLLBACK_FAILED_INVALID_INPUT",
                 "Sorry, we failed to revert to version {version} - there was a system error.",
                 [
                     'version' => $version
@@ -329,7 +353,7 @@ class Revertable extends DataExtension {
         } catch(\Exception $e) {
             // catch general exceptions in the rollback
             $message = _t(
-                __CLASS__ . ".VERSIONED_ROLLBACK_FAILED",
+                "ReviewAndRevert.VERSIONED_ROLLBACK_FAILED",
                 "Sorry, we could not revert to version {version} at this time.",
                 [
                     'version' => $version
@@ -339,19 +363,22 @@ class Revertable extends DataExtension {
 
         if(!$rollback) {
             // rollback failed, set the message to provide feedback
-            $form->sessionMessage($message, ValidationResult::TYPE_BAD, ValidationResult::CAST_HTML);
+            $form->sessionMessage($message, ValidationResult::TYPE_ERROR, ValidationResult::CAST_HTML);
         } else {
-            // all good...
-            $message = _t(
-                __CLASS__ . ".REVERTED_OK",
-                "Reverted to version #{version}, the new version is #{new}",
-                [
-                    'version' => $version,
-                    'new' => $current->Version
-                ]
-            );
+
             // the link target after a successul revert will be the draft/unversioned view of the record
             $link = $this->owner->CMSEditLink();
+
+            // all good...
+            $message = _t(
+                "ReviewAndRevert.REVERTED_OK",
+                "Reverted to version {version}, the new version is {new} - redirecting to {link}",
+                [
+                    'version' => $version,
+                    'new' => $current->Version,
+                    'link' => $link
+                ]
+            );
             // set a successful message
             $form->sessionMessage($message, ValidationResult::TYPE_GOOD, ValidationResult::CAST_HTML);
         }
@@ -373,37 +400,100 @@ class Revertable extends DataExtension {
 
     }
 
+    /**
+     * Update CMS fields to provide a history listing
+     * This is hit both in the current draft view and the ?rv= version view
+     */
     public function updateCMSFields(Fieldlist $fields)
     {
-
-        // performReadonlyTransformation
-
-        /**
-         * @var string
-         */
-        $version = RevertableVersionedGridFieldItemRequest::getRequestedRevertVersion();
 
         // Check if versioned
         if(!$this->owner->hasExtension(Versioned::class)) {
             return;
         }
 
+        // if the owner does not exist .. cannot revert !
+        if(!$this->owner->exists()) {
+            return;
+        }
+
+        /**
+         * The current version being viewed, may be empty
+         * @var string
+         */
+        $version = Revertable_VersionedGridFieldItemRequest::getRequestedRevertVersion();
+
+        /**
+         * The most recent version of the record
+         * @var DataObject|Versioned
+         */
+        $latest = $this->owner->getLatestVersionForRevert();
+        $title = "";
+        if(!empty($latest->Version)) {
+            $title = _t(
+                "ReviewAndRevert.HISTORY_VERSION",
+                "History (v{version})",
+                [
+                    'version' => $latest->Version
+                ]
+            );
+        }
+
+        // The history fields must be present in order to handle the request to view a versioned record
+        $historyFields = $this->owner->getHistoryFields();
+        $tab = $fields->findOrMakeTab('Root.History');
+        if($title) {
+            $tab->setTitle( $title );
+        }
+        $fields->addFieldsToTab('Root.History', $historyFields);
+
+    }
+
+    /**
+     * Get fields used to display the History listing
+     * Includes a LiteralField message, an optional; GridField of versions, an optional hidden field
+     */
+    public function getHistoryFields() : FieldList {
+
+        /**
+         * Cannot show history fields for a non-existent record
+         */
+        if(!$this->owner->exists()) {
+            return FieldList::create(
+                LiteralField::create(
+                    $this->owner->getHistoryViewerFieldName() . 'Literal',
+                    '<p class="message warning">'
+                    . _t(
+                        "ReviewAndRevert.REVERT_NOT_AVAILABLE_RECORD_DOES_NOT_EXIST",
+                        "This record does not exist and cannot be reverted."
+                    )
+                    . '</p>'
+                )
+            );
+        }
+
         /**
          * @var DataObject|Versioned
          */
-        $latest = Versioned::get_latest_version(get_class($this->owner), $this->owner->ID);
+        $latest = $this->owner->getLatestVersionForRevert();
+
+        /**
+        * The version, if being requested, taken from the URL
+         * @var string
+         */
+        $version = Revertable_VersionedGridFieldItemRequest::getRequestedRevertVersion();
+
+        // available fields
+        $listing = $literal = $hidden = null;
 
         if($is_workflowed = $this->owner->isRevertableRecordWorkflowed()) {
+
             // Rule: items in a workflow cannot be reverted
-            $tab = $fields->findOrMakeTab('Root.History');
-            $tab->setTitle("History (v{$latest->Version})");
-            $fields->addFieldsToTab(
-                'Root.History', [
-                    LiteralField::create(
-                        $this->getHistoryViewerFieldName() . 'Literal',
+            $literal = LiteralField::create(
+                        $this->owner->getHistoryViewerFieldName() . 'Literal',
                         '<p class="message warning">'
                         . _t(
-                            __CLASS__ . ".REVERT_NOT_AVAILABLE_WORKFLOW",
+                            "ReviewAndRevert.REVERT_NOT_AVAILABLE_WORKFLOW",
                             "'{title}' is currently in a workflow and cannot be reverted.<br>"
                             . "To revert this record to a previous version, the workflow request must first be approved or rejected.",
                             [
@@ -411,47 +501,30 @@ class Revertable extends DataExtension {
                             ]
                         )
                         . '</p>'
-                    )
-                ]
             );
 
         } else {
 
-            // if in versioned mode -> no need for a history listing
-            if($version) {
-
-                // on the versioned screen -> apply a hidden field with the version number
-                $fields->addFieldToTab(
-                    'Root.Main',
-                    HiddenField::create(
-                        $this->owner->getRevertTargetForUrl(),// just the field name
-                        'Version', // the title
-                        $version
-                    )
-                );
-
-            }
-
-            // On the the unversioned screen -> show a list of versions, most recent first
-            $tab = $fields->findOrMakeTab('Root.History');
-            $tab->setTitle("History (v{$latest->Version})");
 
             if($version) {
+
                 $literal = LiteralField::create(
-                    $this->getHistoryViewerFieldName() . 'Literal',
+                    $this->owner->getHistoryViewerFieldName() . 'Literal',
                     '<p class="message info">'
                     . _t(
-                        __CLASS__ . ".AVAILABLE_VERSIONS_HELP",
+                        "ReviewAndRevert.AVAILABLE_VERSIONS_HELP",
                         "Previous versions of this record"
                     )
                     . '</p>'
                 );
+
             } else {
+
                 $literal = LiteralField::create(
-                    $this->getHistoryViewerFieldName() . 'Literal',
+                    $this->owner->getHistoryViewerFieldName() . 'Literal',
                     '<p class="message info">'
                     . _t(
-                        __CLASS__ . ".AVAILABLE_VERSIONS_HELP",
+                        "ReviewAndRevert.AVAILABLE_VERSIONS_HELP",
                         "These versions are available as rollback points"
                     )
                     . '</p>'
@@ -459,27 +532,29 @@ class Revertable extends DataExtension {
             }
 
             // retrieve the listing of versions for this record
-            $listing = $this->getHistoryListingField($version);
-            $fields->addFieldsToTab(
-                'Root.' . _t(__CLASS__ . '.HISTORY_TAB_NAME', 'History'),
-                [
-                    $literal,
-                    $listing
-                ]
-            );
+            $listing = $this->getHistoryListingField($latest->Version);
 
+        }// end else
 
+        $fields = FieldList::create();
+        $fields->push($literal);
+        if($listing) {
+            $fields->push($listing);
         }
+        if($hidden) {
+            $fields->push($hidden);
+        }
+
+        return $fields;
 
     }
 
     /**
      * Gridfield with versions of this record
      * Note that a field *must* be returned even in a versioned view, otherwise the request will return a 404
-     * @return FormField
+     * @return GridField
      */
-    protected function getHistoryListingField(string $version = null) : FormField {
-
+    protected function getHistoryListingField($excludeVersion = null) : GridField {
         $list = $this->owner->VersionsList()
                             ->filter(['WasDeleted' => 0])//ignore deleted deleted versions
                             ->sort(['Version' => 'DESC'])
@@ -490,50 +565,226 @@ class Revertable extends DataExtension {
                                 "LastEdited",
                                 "AuthorID"
                             ]);
+        if($excludeVersion) {
+            $list = $list->exclude(['Version' => $excludeVersion]);
+        }
+
         $field = GridField::create(
-            $this->getHistoryViewerFieldName(),
-            _t(__CLASS__ . '.HISTORY', 'History'),
+            $this->owner->getHistoryViewerFieldName(),
+            _t('ReviewAndRevert.HISTORY', 'History'),
             $list
         );
 
         // Config for this grid field is just a record viewer
-        $config = new GridFieldConfig_RecordViewer();
-        // ensure review actions are handled by this item request class
-        $config->addComponent( new GridFieldDetailForm() );
-        $config->getComponentByType(
-            GridFieldDetailForm::class
-        )->setItemRequestClass(RevertableVersionedGridFieldItemRequest::class);
-        $config->getComponentByType(GridFieldDataColumns::class)
-                    ->setDisplayFields([
-                        'Version' => '#',
-                        'LastEdited.Nice' => _t(__CLASS__ . '.WHEN', 'When'),
-                        'Title' => _t(__CLASS__ . '.TITLE', 'Title'),
-                        'Author.Name' => _t(__CLASS__ . '.AUTHOR', 'Author'),
-                        'WasPublished.Nice'  => _t(__CLASS__ . '.WAS_PUBLISHED', 'Was published?')
-                    ]);
+        $config = new GridFieldConfig_Base();
+
+        // Remove any componets not required in the
         $config->removeComponentsByType([
             GridFieldFilterHeader::class,
             GridFieldToolbarHeader::class,
             GridFieldPaginator::class,
             GridFieldPageCount::class,
+            GridFieldEditButton::class,
             GridFieldViewButton::class
         ]);
 
-        // This causes all manner of double scroll badness!
-        // it would be useful to go to this URL directly
-        //$config->addComponent( new GridFieldViewButton() );
+        // Add an action menu
+        $config->addComponent( new GridField_ActionMenu() );
 
-        if(!$version) {
-            $config->addComponent( new ReviewForRevertButton() );
-        }
+        // ensure review actions are handled by this item request class
+        $config->addComponent( new GridFieldDetailForm() );
+        $config->getComponentByType(
+            GridFieldDetailForm::class
+        )->setItemRequestClass(Revertable_VersionedGridFieldItemRequest::class);
 
-        $field->setConfig($config);
+        // Update display fields with basic versioned information
+        $config->getComponentByType(GridFieldDataColumns::class)
+                    ->setDisplayFields([
+                        'Version' => '#',
+                        'LastEdited.Nice' => _t('ReviewAndRevert.WHEN', 'When'),
+                        'Title' => _t('ReviewAndRevert.TITLE', 'Title'),
+                        'Author.Name' => _t('ReviewAndRevert.AUTHOR', 'Author'),
+                        'WasPublished.Nice'  => _t('ReviewAndRevert.WAS_PUBLISHED', 'Was published?')
+                    ]);
+
+        // Add the Review/revert button to the GridField
+        $config->addComponent( new ReviewForRevertButton() );
+
+        $field->setConfig( $config );
 
         return $field;
     }
 
-    public function getHistoryViewerFieldName() {
+    /**
+     * Return the field name for the history viewer
+     */
+    public function getHistoryViewerFieldName() : string {
         return "ReviewAndRevert";
+    }
+
+    /**
+     * Get the ChangeSet record for a version of this record
+     * @return ChangeSet|null
+     */
+    public function getChangeSet(string $version) {
+        if(!$this->owner->exists()) {
+            return null;
+        }
+        $changeSetItem = ChangeSetItem::get()->filter([
+            'ObjectClass' => get_class($this->owner),
+            'ObjectID' => $this->owner->ID,
+            'VersionAfter'=> $version
+        ])->first();
+
+        if(!empty($changeSetItem->ID)) {
+            return $changeSetItem->ChangeSet();
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Get all items in this version's changeset
+     * @return DataList|null
+     */
+    public function getChangeSetItems($version) {
+        if($changeSet = $this->owner->getChangeSet($version)) {
+            return $changeSet->Changes();
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Return changes field values and items in the changeset relevent to this version of the record
+     * The return value is a FieldList with changes as templated Literal Fields
+     * @return FieldList
+     */
+    public function getChangedItems() : FieldList {
+        // attempt to find changed fields
+        try {
+
+            $fieldList = FieldList::create();
+
+            // Nothing changed if it doesn't exist yet
+            if(!$this->owner->exists()) {
+                throw new \Exception("Record does not exist");
+            }
+
+            // Latest version
+            $latest = $this->owner->getLatestVersionForRevert();
+            if(empty($latest->ID)) {
+                throw new \Exception("Record does not exist with latest version");
+            }
+
+            // If the same version ...
+            if($this->owner->Version == $latest->Version) {
+                throw new \Exception("Record is the latest version, no changes");
+            }
+
+            // A bunch of ignored fields
+            $ignoredFields = [
+                // 'Version',
+                'WasPublished',
+                'PublisherID',
+                'LastEdited',
+            ];
+
+            // The available hasOne relations
+            $recordHasOne = $this->owner->hasOne();
+
+            // get array keys to remove hasOnes
+            $recordHasOneKeys = array_keys($recordHasOne);
+            array_walk($recordHasOneKeys,  function(&$v) {
+                $v = "{$v}ID";
+            });
+            // Add to ignored fields
+            $ignoredFields = array_merge($ignoredFields, $recordHasOneKeys);
+            // Remove ignored fields
+            $recordFields = $this->owner->getQueriedDatabaseFields();
+            foreach($ignoredFields as $ignoredField) {
+                unset($recordFields [ $ignoredField ] );
+            }
+
+            // Collect all the change for this field
+            $data = [];
+            $data['ChangedFields'] = ArrayList::create();
+
+            foreach($recordFields as $fieldName => $fieldValue) {
+
+                try {
+
+                    // on error, just get value
+                    $recordValue = $this->owner->{$fieldName};
+                    $latestValue = $latest->{$fieldName};
+
+                    if($recordValue instanceof DBField) {
+                        $recordValue = $recordValue->getValue();
+                    }
+                    if($latestValue instanceof DBField) {
+                        $latestValue = $latestValue->getValue();
+                    }
+
+                    if($recordValue != $latestValue) {
+
+                        // push difference
+                        $data['ChangedFields']->push(
+                            ArrayData::create([
+                                'FieldName' => $fieldName,
+                                'Title' => FormField::name_to_label($fieldName),
+                                'Type' => 'Field',
+                                'RecordValue' =>  $recordValue,
+                                'LatestValue' => $latestValue
+                            ])
+                        );
+                    }
+
+                } catch (\Exception $e) {
+                    // handle errors in field value diffs
+                }
+
+            }
+
+            // Create field summary
+            if(!empty($data)) {
+                $changedFields = ArrayData::create($data)
+                    ->renderWith('NSWDPC/Utilities/VersionedRecordDiscovery/ChangedFields');
+                $fieldList->push(
+                    LiteralField::create(
+                        'ChangedFieldsLiteral',
+                        $changedFields
+                    )
+                );
+            }
+
+            /**
+             * @var DataList|null
+             */
+            if($changeSetItems = $this->owner->getChangeSetItems( $this->owner->Version ) ) {
+                $data = [];
+                $data['ChangedItems'] = $changeSetItems;
+                $changedItems = ArrayData::create($data)
+                    ->renderWith('NSWDPC/Utilities/VersionedRecordDiscovery/ChangedItems');
+                $fieldList->push(
+                    LiteralField::create(
+                        'ChangedItemsLiteral',
+                        $changedItems
+                    )
+                );
+            }
+
+
+        } catch (\Exception $e) {
+            $fieldList = FieldList::create();
+            $fieldList->push(
+                LiteralField::create(
+                    'ChangedFieldLiteralError',
+                    '<p class="message warning">' . htmlspecialchars($e->getMessage()) . '</p>'
+                )
+            );
+        }
+
+        return $fieldList;
     }
 
 }

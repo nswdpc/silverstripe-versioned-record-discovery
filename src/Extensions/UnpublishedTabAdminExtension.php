@@ -49,7 +49,7 @@ class UnpublishedTabAdminExtension extends Extension {
                 $updated[ $slug ] = [
                     'unpublished' => true,
                     'dataClass' => $spec['dataClass'],
-                    'title' => "{$name} (" . _t(__CLASS__ . ".UNPUBLISHED", "unpublished") . ")"
+                    'title' => "{$name} (" . _t("ReviewAndRevert.UNPUBLISHED", "unpublished") . ")"
                 ];
 
             }
