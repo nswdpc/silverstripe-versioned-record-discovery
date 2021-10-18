@@ -27,6 +27,11 @@ class UnpublishedRecordReport extends Report
      */
     private static $default_target_model = "";
 
+    /**
+     * @var array
+     */
+    private static $restrict_to_models = [];
+
     public function title() {
         return _t(__CLASS__ . ".REPORT_TITLE", "Unpublished records");
     }
@@ -236,10 +241,22 @@ class UnpublishedRecordReport extends Report
         $list = array_filter(
             ClassInfo::subclassesFor(DataObject::class),
             function ($class) {
-                return (
-                    DataObject::has_extension($class, Versioned::class) &&
-                    DataObject::singleton($class)->hasStages()
-                );
+                $result = DataObject::has_extension($class, Versioned::class) &&
+                    DataObject::singleton($class)->hasStages();
+
+                if(!$result) {
+                    return false;
+                }
+
+                $restrictedModels  = $this->config()->get('restrict_to_models');
+                if(is_array($restrictedModels) && !empty($restrictedModels)) {
+                    // check if restricted and allowed
+                    $result = in_array($class, $restrictedModels);
+                } else {
+                    // no restriction
+                    $result = true;
+                }
+                return $result;
             }
         );
 

@@ -5,3 +5,5 @@ Only:
 ---
 NSWDPC\Utilities\VersionedRecordDiscovery\UnpublishedRecordReport:
   default_target_model: 'SilverStripe\CMS\Model\SiteTree'
+  restrict_to_models:
+    - 'SilverStripe\CMS\Model\SiteTree'
