@@ -51,11 +51,9 @@ class UnpublishedRecordReport extends Report
     }
 
     /**
-     * counts the number of objects returned
-     * @param array $params - any parameters for the sourceRecords
-     * @return int
+     * @inheritdoc
      */
-    public function getCount($params = array())
+    public function getCount($params = array(), $limit = null)
     {
         $default_target_model = $this->config()->get('default_target_model');
         if(empty($params) && !$default_target_model) {
